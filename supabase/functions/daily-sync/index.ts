@@ -1,0 +1,186 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  getCachedFplData,
+  mapPositionType,
+  FplBootstrap,
+  FplFixture,
+} from "../_shared/fpl.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 1. Fetch Bootstrap-Static (cache for 10 minutes)
+    const { data: bootstrap, isDelayed } = await getCachedFplData<FplBootstrap>(
+      supabase,
+      "fpl_bootstrap",
+      "https://fantasy.premierleague.com/api/bootstrap-static/",
+      10 * 60 * 1000
+    );
+
+    if (!bootstrap || !bootstrap.elements) {
+      return new Response(JSON.stringify({ error: "Failed to fetch FPL bootstrap data", isDelayed }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const teamMap = new Map<number, { name: string; shortName: string }>();
+    for (const t of bootstrap.teams) {
+      teamMap.set(t.id, { name: t.name, shortName: t.short_name });
+    }
+
+    // 2. Fetch rating calibration from database
+    const { data: calRows } = await supabase.from("rating_calibration").select("*");
+    const calMap: Record<string, { mean: number; std: number }> = {};
+    if (calRows) {
+      for (const row of calRows) {
+        calMap[row.position] = { mean: parseFloat(row.mean), std: parseFloat(row.std) };
+      }
+    }
+
+    // 3. Process players
+    let playersUpserted = 0;
+    let playersDelisted = 0;
+    const activeFplIds = new Set<number>();
+
+    for (const el of bootstrap.elements) {
+      activeFplIds.add(el.id);
+      const pos = mapPositionType(el.element_type);
+      const teamInfo = teamMap.get(el.team) || { name: "Premier League", shortName: "PL" };
+      const minutesThisSeason = el.minutes || 0;
+
+      // Filter: Players with at least 180 minutes or selected by users or high profile
+      // Also list if they have minutes or are first-team squad members
+      const hasEnoughMinutes = minutesThisSeason >= 90 || el.total_points > 10 || el.now_cost >= 50;
+
+      const n = Math.min(38, minutesThisSeason / 90.0);
+      let listingPrice = 0.6000;
+      if (n > 0) {
+        const estRating = Math.min(10.0, Math.max(1.0, 6.0 + (el.total_points / Math.max(1, el.minutes / 90.0)) * 0.2));
+        listingPrice = (n * estRating + 10 * 6.3) / (n + 10) / 10;
+      }
+      listingPrice = Math.max(0.0100, Math.min(1.0000, Math.round(listingPrice * 10000) / 10000));
+
+      const chanceOfPlaying = el.chance_of_playing_this_round ?? el.chance_of_playing_next_round ?? (el.status === "a" ? 100 : 0);
+      const shirtNumber = el.squad_number || 0;
+      const fullName = `${el.first_name} ${el.second_name}`.trim();
+
+      const { error: upsertErr } = await supabase.from("players").upsert(
+        {
+          fpl_id: el.id,
+          name: el.web_name,
+          full_name: fullName,
+          position: pos,
+          club: teamInfo.name,
+          jersey_number: shirtNumber,
+          shirt_number: shirtNumber,
+          base_price: listingPrice,
+          chance_of_playing: chanceOfPlaying,
+          news: el.news || "",
+          status: "active",
+          is_delisted: el.status === "u",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "fpl_id" }
+      );
+
+      if (!upsertErr) playersUpserted++;
+    }
+
+    // 4. Mark delisted players who left Premier League
+    const { data: existingPlayers } = await supabase
+      .from("players")
+      .select("id, fpl_id, is_delisted")
+      .not("fpl_id", "is", null);
+
+    if (existingPlayers) {
+      for (const p of existingPlayers) {
+        if (p.fpl_id && !activeFplIds.has(p.fpl_id) && !p.is_delisted) {
+          await supabase.from("players").update({
+            is_delisted: true,
+            status: "active", // Sell-only mode
+            updated_at: new Date().toISOString(),
+          }).eq("id", p.id);
+          playersDelisted++;
+        }
+      }
+    }
+
+    // 5. Fetch Fixtures and sync Matches table
+    const { data: fixtures } = await getCachedFplData<FplFixture[]>(
+      supabase,
+      "fpl_fixtures",
+      "https://fantasy.premierleague.com/api/fixtures/",
+      2 * 60 * 1000
+    );
+
+    let fixturesSynced = 0;
+    if (fixtures && Array.isArray(fixtures)) {
+      for (const f of fixtures) {
+        const homeTeam = teamMap.get(f.team_h)?.name || `Team ${f.team_h}`;
+        const awayTeam = teamMap.get(f.team_a)?.name || `Team ${f.team_a}`;
+        let status = "scheduled";
+        if (f.finished || f.finished_provisional) {
+          status = "finished";
+        } else if (f.started) {
+          status = "live";
+        }
+
+        const matchRecord = {
+          home_club: homeTeam,
+          away_club: awayTeam,
+          match_date: f.kickoff_time,
+          status,
+          current_minute: f.minutes || 0,
+          home_score: f.team_h_score ?? 0,
+          away_score: f.team_a_score ?? 0,
+        };
+
+        // Find or insert into matches
+        const { data: existingMatch } = await supabase
+          .from("matches")
+          .select("id")
+          .eq("home_club", homeTeam)
+          .eq("away_club", awayTeam)
+          .maybeSingle();
+
+        if (existingMatch) {
+          await supabase.from("matches").update(matchRecord).eq("id", existingMatch.id);
+        } else {
+          await supabase.from("matches").insert(matchRecord);
+        }
+        fixturesSynced++;
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        playersUpserted,
+        playersDelisted,
+        fixturesSynced,
+        dataDelayed: isDelayed,
+        timestamp: new Date().toISOString(),
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

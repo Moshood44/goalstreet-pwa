@@ -333,7 +333,7 @@ export const TradeBottomSheet: React.FC<TradeBottomSheetProps> = ({
               onClick={handleExecuteTrade}
             >
               {isSubmitting
-                ? 'Processing on Blockchain...'
+                ? 'Processing Order on Server...'
                 : isLocked
                 ? 'Match Live • Trading Locked'
                 : side === 'BUY'

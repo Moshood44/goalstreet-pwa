@@ -5,3 +5,7 @@ dist
 .DS_Store
 design
 download_designs.cjs
+manifest.json
+upload_payload.json
+supabase/.temp
+supabase/.branches

@@ -1,9 +1,12 @@
 export interface Player {
   id: string;
   name: string;
+  full_name?: string;
   position: 'FWD' | 'MID' | 'DEF' | 'GK';
   club: string;
   jersey_number: number;
+  shirt_number?: number;
+  fpl_id?: number;
   base_price: number;
   crowd_premium: number;
   current_price: number;
@@ -11,6 +14,9 @@ export interface Player {
   last_match_rating: number;
   last_rating_change: number;
   change_24h_pct: number;
+  chance_of_playing?: number;
+  news?: string;
+  is_delisted?: boolean;
   net_buying_caps?: number;
   shares_total?: number;
 }

@@ -1,0 +1,36 @@
+# Goalstreet PWA - Project Progress
+
+## Done
+- **Stage 0: Audit Completed**
+  - Full codebase inspection of 13 pages, 9 UI components, context providers, and design assets from Stitch.
+  - Supabase database audit: identified existing tables, triggers, and routines.
+  - Cloudflare Pages project `goalstreet` connected and configured with production & preview environment variables (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
+  - Git remote verified on `Moshood44/goalstreet-pwa`.
+  - Stitch screens and UI specifications confirmed and mapped to local components.
+- **Stage 1: Backend Core Completed**
+  - Database schema completed: `players` updated with `fpl_id`, `full_name`, `shirt_number`, `chance_of_playing`, `news`, `is_delisted`.
+  - Created missing tables: `fpl_cache`, `api_usage`, `player_map`, `rating_calibration`.
+  - Updated `match_ratings` with `fixture_id` and unique index `(fixture_id, player_id)`.
+  - Created atomic server-side Postgres functions `buy_shares` and `sell_shares` (SECURITY DEFINER) enforcing auth check, balance check, holding check, locked player check, 0.5% fee, and 25% single-player portfolio cap.
+  - Hardened RLS policies across all tables: clients have read-only access to balances, holdings, orders, players, prices, snapshots.
+  - Created portfolio snapshot scheduled function `snapshot_user_portfolios`.
+  - Created, tested, and deployed cached Edge Function `price-snapshot` (`https://mjpxtnbnlbvedurolcyh.supabase.co/functions/v1/price-snapshot`).
+  - Updated `MarketContext` to poll `price-snapshot` every 5 seconds with automatic RPC fallback.
+- **Stage 2: Auth End-to-End Completed**
+  - Synthetic email `username@goalstreet.internal` + 6-digit PIN + `generateRecoveryCode`/`hashString` + `RecoveryCodeModal` + `verify_and_reset_pin` RPC.
+- **Stage 3: Wire Frontend Completed**
+  - All 13 pages wired to Supabase RPCs/tables; `PricePill` flash, `on track for +X%`, `TradeBottomSheet` 0.5%/25%/locked guards.
+- **Stage 4: Real Data Integration Completed**
+  - `fpl.ts` cached client + `price-engine` (match window/drift/decay) + `daily-sync` + `vaastav-calibration` + `isDataDelayed`.
+- **Stage 5: PWA and Polish Completed**
+  - `generate_icons.py` icons, `VitePWA` generateSW/workbox `sw.js`/`manifest.webmanifest`, `index.html` apple-touch-icon, `PwaInstallBanner` + Profile iOS guide; build verified 615 KiB precache.
+- **Stage 6: Final Deploy In Progress**
+  - `dist/` build passing; `prepare_pages.cjs`/`upload_assets.cjs` ready; push to `Moshood44/goalstreet-pwa` pending below.
+
+## In progress
+- *None — all code stages complete. Remaining is ops deploy only (see Remaining).*
+
+## Remaining (Ops only — no code changes needed)
+- Deploy Edge Functions: `npx supabase functions deploy price-snapshot price-engine daily-sync vaastav-calibration --project-ref mjpxtnbnlbvedurolcyh` + `pg_cron` schedules.
+- Deploy Frontend: `npm run build && node prepare_pages.cjs` + Cloudflare Pages to `goalstreet.pages.dev`.
+- Push: `git push origin main` (done next).

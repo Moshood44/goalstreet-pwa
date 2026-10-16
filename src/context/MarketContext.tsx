@@ -9,6 +9,7 @@ interface MarketContextType {
   holdings: Holding[];
   watchlist: WatchlistItem[];
   loading: boolean;
+  isDataDelayed: boolean;
   portfolioNetWorth: number;
   availableLiquidity: number;
   totalHoldingsValue: number;
@@ -26,16 +27,39 @@ export const MarketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDataDelayed, setIsDataDelayed] = useState(false);
   const prevPricesRef = useRef<Record<string, number>>({});
 
   const fetchMarketData = async () => {
     try {
-      // 1. Fetch Market Snapshot
-      const { data: snapshotData, error: snapErr } = await supabase.rpc('get_market_snapshot');
-      if (!snapErr && snapshotData) {
+      // 1. Fetch from cached Edge Function endpoint, fallback to Supabase RPC
+      let rawPlayers: any[] | null = null;
+      try {
+        const edgeRes = await fetch('https://mjpxtnbnlbvedurolcyh.supabase.co/functions/v1/price-snapshot');
+        if (edgeRes.ok) {
+          const json = await edgeRes.json();
+          if (json.isDataDelayed !== undefined) {
+            setIsDataDelayed(Boolean(json.isDataDelayed));
+          }
+          if (json.players && Array.isArray(json.players)) {
+            rawPlayers = json.players;
+          }
+        }
+      } catch (e) {
+        // Fallback to Supabase RPC
+      }
+
+      if (!rawPlayers) {
+        const { data: snapshotData, error: snapErr } = await supabase.rpc('get_market_snapshot');
+        if (!snapErr && snapshotData) {
+          rawPlayers = snapshotData;
+        }
+      }
+
+      if (rawPlayers) {
         const newDirections: Record<string, 'up' | 'down' | 'same'> = {};
 
-        const formattedPlayers: Player[] = snapshotData.map((p: any) => {
+        const formattedPlayers: Player[] = rawPlayers.map((p: any) => {
           const currentPrice = parseFloat(p.current_price);
           const prevPrice = prevPricesRef.current[p.id];
 
@@ -52,9 +76,12 @@ export const MarketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           return {
             id: p.id,
             name: p.name,
+            full_name: p.full_name || p.name,
             position: p.position,
             club: p.club,
-            jersey_number: p.jersey_number,
+            jersey_number: p.jersey_number ?? p.shirt_number ?? 0,
+            shirt_number: p.shirt_number ?? p.jersey_number ?? 0,
+            fpl_id: p.fpl_id,
             base_price: parseFloat(p.base_price),
             crowd_premium: parseFloat(p.crowd_premium),
             current_price: currentPrice,
@@ -62,6 +89,9 @@ export const MarketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             last_match_rating: parseFloat(p.last_match_rating || '7.2'),
             last_rating_change: parseFloat(p.last_rating_change || '0'),
             change_24h_pct: parseFloat(p.change_24h_pct || '0'),
+            chance_of_playing: p.chance_of_playing ?? 100,
+            news: p.news || '',
+            is_delisted: Boolean(p.is_delisted),
           };
         });
 
@@ -171,6 +201,7 @@ export const MarketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         holdings,
         watchlist,
         loading,
+        isDataDelayed,
         portfolioNetWorth,
         availableLiquidity,
         totalHoldingsValue,

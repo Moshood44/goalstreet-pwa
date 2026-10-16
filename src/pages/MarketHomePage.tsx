@@ -20,6 +20,7 @@ export const MarketHomePage: React.FC = () => {
     availableLiquidity,
     isWatchlisted,
     toggleWatchlist,
+    isDataDelayed,
   } = useMarket();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -97,6 +98,17 @@ export const MarketHomePage: React.FC = () => {
       <main className="max-w-md mx-auto px-4 pt-3 flex flex-col gap-4">
         {/* PWA Install Banner */}
         <PwaInstallBanner />
+
+        {/* Data Delayed Notice */}
+        {isDataDelayed && (
+          <div className="w-full bg-secondary-container/20 border border-secondary-container/40 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs text-on-surface">
+            <div className="flex items-center gap-2">
+              <span className="text-secondary font-bold">⚠️</span>
+              <span className="font-medium text-[11px] text-on-surface-variant">FPL sync delayed (&gt;15m). Serving last verified prices.</span>
+            </div>
+            <span className="text-[10px] bg-secondary-fixed/50 text-on-secondary-fixed px-2 py-0.5 rounded-full font-bold">Data delayed</span>
+          </div>
+        )}
 
         {/* Greeting & Bento Balance Card */}
         <section className="flex flex-col gap-2.5">
