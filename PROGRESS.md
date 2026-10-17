@@ -24,15 +24,17 @@
   - `fpl.ts` cached client + `price-engine` (match window/drift/decay) + `daily-sync` + `vaastav-calibration` + `isDataDelayed`.
 - **Stage 5: PWA and Polish Completed**
   - `generate_icons.py` icons, `VitePWA` generateSW/workbox `sw.js`/`manifest.webmanifest`, `index.html` apple-touch-icon, `PwaInstallBanner` + Profile iOS guide; build verified 615 KiB precache.
-- **Stage 6: Final Deploy In Progress**
+- **Stage 6: Final Deploy Completed**
   - Supabase Edge Functions deployed and ACTIVE: `price-snapshot`, `daily-sync`, `price-engine`, `vaastav-calibration`.
   - All 4 `pg_cron` schedules active in database (`price-engine` 1m, `daily-sync` 04:00 UTC, weekly & monthly snapshots).
   - Live data sync executed: 667 Premier League players and 380 fixtures synced from FPL; vaastav calibration applied.
   - Production bundle `dist/` built and verified with Vite PWA precache (615 KiB, 151 modules).
   - GitHub repo pushed and up to date on `Moshood44/goalstreet-pwa` `main`.
+  - Cloudflare Pages live production deployment complete at: **https://goalstreet.pages.dev**
 
 ## In progress
-- Cloudflare Pages frontend deployment to `goalstreet.pages.dev`.
+- None (All stages 0 through 6 completed).
 
 ## Remaining
-- Awaiting Cloudflare API Token or MCP re-authentication to deploy `dist/` to `goalstreet.pages.dev`.
+- None. App is live, installable, and fully testable in production.
+
