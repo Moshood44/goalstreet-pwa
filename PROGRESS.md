@@ -25,12 +25,14 @@
 - **Stage 5: PWA and Polish Completed**
   - `generate_icons.py` icons, `VitePWA` generateSW/workbox `sw.js`/`manifest.webmanifest`, `index.html` apple-touch-icon, `PwaInstallBanner` + Profile iOS guide; build verified 615 KiB precache.
 - **Stage 6: Final Deploy In Progress**
-  - `dist/` build passing; `prepare_pages.cjs`/`upload_assets.cjs` ready; push to `Moshood44/goalstreet-pwa` pending below.
+  - Supabase Edge Functions deployed and ACTIVE: `price-snapshot`, `daily-sync`, `price-engine`, `vaastav-calibration`.
+  - All 4 `pg_cron` schedules active in database (`price-engine` 1m, `daily-sync` 04:00 UTC, weekly & monthly snapshots).
+  - Live data sync executed: 667 Premier League players and 380 fixtures synced from FPL; vaastav calibration applied.
+  - Production bundle `dist/` built and verified with Vite PWA precache (615 KiB, 151 modules).
+  - GitHub repo pushed and up to date on `Moshood44/goalstreet-pwa` `main`.
 
 ## In progress
-- *None — all code stages complete. Remaining is ops deploy only (see Remaining).*
+- Cloudflare Pages frontend deployment to `goalstreet.pages.dev`.
 
-## Remaining (Ops only — no code changes needed)
-- Deploy Edge Functions: `npx supabase functions deploy price-snapshot price-engine daily-sync vaastav-calibration --project-ref mjpxtnbnlbvedurolcyh` + `pg_cron` schedules.
-- Deploy Frontend: `npm run build && node prepare_pages.cjs` + Cloudflare Pages to `goalstreet.pages.dev`.
-- Push: `git push origin main` (done next).
+## Remaining
+- Awaiting Cloudflare API Token or MCP re-authentication to deploy `dist/` to `goalstreet.pages.dev`.
