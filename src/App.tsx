@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MarketProvider } from './context/MarketContext';
 import { BottomTabBar } from './components/ui/BottomTabBar';
+import { ReloadPrompt } from './components/ui/ReloadPrompt';
 
 import { WelcomePage } from './pages/WelcomePage';
 import { MarketHomePage } from './pages/MarketHomePage';
@@ -18,6 +19,7 @@ import { PlayerComparePage } from './pages/PlayerComparePage';
 import { SquadBattlesPage } from './pages/SquadBattlesPage';
 import { TraderXpPage } from './pages/TraderXpPage';
 import { NotificationsPage } from './pages/NotificationsPage';
+import { SystemStatusPage } from './pages/SystemStatusPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,24 +51,15 @@ const AppRoutes: React.FC = () => {
     return <WelcomePage />;
   }
 
-  // Hide bottom tab bar on full-screen sub-routes
-  const hideTabs =
-    location.pathname.startsWith('/player/') ||
-    location.pathname === '/compare' ||
-    location.pathname === '/orders' ||
-    location.pathname === '/watchlist' ||
-    location.pathname === '/xp' ||
-    location.pathname === '/notifications' ||
-    location.pathname === '/battles';
-
   return (
-    <div className="min-h-screen w-full bg-surface flex flex-col">
+    <div className="min-h-screen w-full bg-surface flex flex-col md:pl-20 xl:pl-64">
       <Routes>
         <Route path="/" element={<MarketHomePage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/live" element={<LiveTickerPage />} />
         <Route path="/leaderboard" element={<LeaderboardPage />} />
         <Route path="/me" element={<ProfilePage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/player/:id" element={<PlayerPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/orders" element={<OrderHistoryPage />} />
@@ -74,10 +67,12 @@ const AppRoutes: React.FC = () => {
         <Route path="/battles" element={<SquadBattlesPage />} />
         <Route path="/xp" element={<TraderXpPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/admin/system-status" element={<SystemStatusPage />} />
         <Route path="*" element={<MarketHomePage />} />
       </Routes>
 
-      {!hideTabs && <BottomTabBar />}
+      <BottomTabBar />
+      <ReloadPrompt />
     </div>
   );
 };

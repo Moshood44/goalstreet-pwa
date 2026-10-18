@@ -5,10 +5,12 @@ import {
   calculateRatingFromScore,
   computeWeightForMinutes,
 } from "../_shared/fpl.ts";
+import { verifyAdminRequest } from "../_shared/adminAuth.ts";
+import { ApiFootballClient } from "../_shared/apiFootball.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-secret",
 };
 
 Deno.serve(async (req: Request) => {
@@ -20,6 +22,14 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const isAdmin = await verifyAdminRequest(req, supabase);
+    if (!isAdmin) {
+      return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing admin secret" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const now = new Date();
 
@@ -48,6 +58,7 @@ Deno.serve(async (req: Request) => {
     }
 
     let actionsPerformed: string[] = [];
+    const apiFootball = new ApiFootballClient(supabase);
 
     // 2. Fetch rating calibration
     const { data: calRows } = await supabase.from("rating_calibration").select("*");
@@ -69,7 +80,6 @@ Deno.serve(async (req: Request) => {
 
       if (liveMatches && liveMatches.length > 0) {
         for (const match of liveMatches) {
-          // Lock players in this match
           await supabase
             .from("players")
             .update({ status: "locked", updated_at: new Date().toISOString() })
@@ -88,7 +98,6 @@ Deno.serve(async (req: Request) => {
 
       if (finishedMatches) {
         for (const f of finishedMatches) {
-          // Fetch players of these clubs
           const { data: matchPlayers } = await supabase
             .from("players")
             .select("*")
@@ -98,7 +107,6 @@ Deno.serve(async (req: Request) => {
             for (const p of matchPlayers) {
               const fixtureKey = String(f.id);
 
-              // Check if already settled
               const { data: existingRating } = await supabase
                 .from("match_ratings")
                 .select("id, settled")
@@ -107,8 +115,25 @@ Deno.serve(async (req: Request) => {
                 .maybeSingle();
 
               if (!existingRating || !existingRating.settled) {
-                // Apply price rule
-                const matchRating = p.last_match_rating || 7.2;
+                let matchRating = p.last_match_rating || 7.0;
+
+                // Check API-Football for per-fixture rating if key available
+                if (await apiFootball.canMakeRequest()) {
+                  const apiRes = await apiFootball.fetchEndpoint<any>("fixtures/players", {
+                    fixture: fixtureKey,
+                    team: p.club,
+                  });
+                  const pStat = apiRes?.response?.[0]?.players?.find(
+                    (item: any) => apiFootball.normalizeName(item.player.name) === apiFootball.normalizeName(p.name)
+                  );
+                  if (pStat?.statistics?.[0]?.games?.rating) {
+                    const parsed = parseFloat(pStat.statistics[0].games.rating);
+                    if (!isNaN(parsed) && parsed > 0) {
+                      matchRating = parsed;
+                    }
+                  }
+                }
+
                 const minutesPlayed = 90;
                 const weight = computeWeightForMinutes(minutesPlayed);
                 const oldBase = parseFloat(p.base_price);
@@ -118,15 +143,13 @@ Deno.serve(async (req: Request) => {
                   Math.min(1.0000, Math.round((oldBase + weight * (targetBase - oldBase)) * 10000) / 10000)
                 );
 
-                // Update player
                 await supabase.from("players").update({
                   base_price: newBase,
-                  status: "active", // Unlock player
+                  status: "active",
                   last_rating_change: Math.round((newBase - oldBase) * 10000) / 10000,
                   updated_at: new Date().toISOString(),
                 }).eq("id", p.id);
 
-                // Record settlement
                 await supabase.from("match_ratings").upsert({
                   match_id: f.id,
                   fixture_id: fixtureKey,
@@ -136,14 +159,12 @@ Deno.serve(async (req: Request) => {
                   settled: true,
                 }, { onConflict: "fixture_id,player_id" });
 
-                // Record price history
                 const currentDisplayed = Math.round(newBase * (1.0 + parseFloat(p.crowd_premium)) * 10000) / 10000;
                 await supabase.from("price_history").insert({
                   player_id: p.id,
                   price: currentDisplayed,
                 });
 
-                // Notify holders
                 const { data: holders } = await supabase
                   .from("holdings")
                   .select("user_id")
@@ -190,7 +211,7 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // 4. Bot Traders: Drift random players slightly (1-3% volume)
+      // 4. Drift random players slightly (1-3% volume)
       const { data: randomSample } = await supabase
         .from("players")
         .select("id, name, base_price, net_buying_caps")
@@ -199,17 +220,19 @@ Deno.serve(async (req: Request) => {
 
       if (randomSample && randomSample.length > 0) {
         for (const p of randomSample) {
-          const deltaCaps = (Math.random() - 0.48) * 1500; // Small random drift
-          const newNet = parseFloat(p.net_buying_caps || "0") + deltaCaps;
-          const newPremium = Math.round(0.15 * Math.tanh(newNet / 200000.0) * 10000) / 10000;
+          const driftDirection = Math.random() > 0.5 ? 1 : -1;
+          const driftAmount = Math.round((Math.random() * 50 + 10) * driftDirection);
+          const currentNet = parseFloat(p.net_buying_caps || "0");
+          const nextNet = currentNet + driftAmount;
+          const nextPremium = Math.round(0.15 * Math.tanh(nextNet / 200000.0) * 10000) / 10000;
 
           await supabase.from("players").update({
-            net_buying_caps: newNet,
-            crowd_premium: newPremium,
+            net_buying_caps: nextNet,
+            crowd_premium: nextPremium,
             updated_at: new Date().toISOString(),
           }).eq("id", p.id);
         }
-        actionsPerformed.push("Simulated bot liquidity drift on 3 players");
+        actionsPerformed.push(`Drift applied to ${randomSample.length} random players`);
       }
     }
 
@@ -217,6 +240,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         isMatchWindow,
+        liveMatchCount,
         actionsPerformed,
         timestamp: new Date().toISOString(),
       }),

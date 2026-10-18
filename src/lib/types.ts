@@ -28,6 +28,7 @@ export interface Profile {
   balance: number;
   xp: number;
   tier: string;
+  is_admin?: boolean;
   recovery_code_hash?: string;
   failed_pin_attempts?: number;
   locked_until?: string | null;
@@ -56,6 +57,7 @@ export interface Order {
   gross_amount: number;
   fee: number;
   net_amount: number;
+  realized_pnl?: number;
   created_at: string;
   player?: Player;
 }
@@ -95,6 +97,7 @@ export interface Challenge {
   title: string;
   description: string;
   trophy_badge: string;
+  code?: string;
   start_time: string;
   end_time: string;
   status: string;

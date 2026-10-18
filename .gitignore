@@ -1,11 +1,14 @@
 node_modules
 dist
 .env
-.env.local
+.env.*
 .DS_Store
 design
-download_designs.cjs
 manifest.json
 upload_payload.json
 supabase/.temp
 supabase/.branches
+.wrangler
+scratch
+*.log
+

@@ -140,6 +140,7 @@ export async function getCachedFplData<T>(
         key: cacheKey,
         data: freshData,
         updated_at: new Date().toISOString(),
+        fetched_at: new Date().toISOString(),
       });
       return { data: freshData, isDelayed: false };
     }

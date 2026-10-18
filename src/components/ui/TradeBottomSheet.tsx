@@ -138,12 +138,12 @@ export const TradeBottomSheet: React.FC<TradeBottomSheetProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center bg-black/60 backdrop-blur-sm animate-fade-in p-0 md:p-4">
         {/* Backdrop click */}
-        <div className="flex-1" onClick={onClose} />
+        <div className="absolute inset-0" onClick={onClose} />
 
-        {/* Sheet Content */}
-        <div className="w-full max-w-md mx-auto bg-surface-container-lowest rounded-t-[32px] p-5 shadow-2xl flex flex-col gap-4 animate-slide-up pb-safe max-h-[90vh] overflow-y-auto">
+        {/* Sheet Content (Bottom-sheet on mobile, centered modal on tablet & desktop) */}
+        <div className="relative z-10 w-full max-w-md mx-auto bg-surface-container-lowest rounded-t-[32px] md:rounded-[32px] p-5 shadow-2xl flex flex-col gap-4 animate-slide-up pb-safe max-h-[90vh] overflow-y-auto">
           {/* Grab handle */}
           <div className="w-12 h-1.5 bg-surface-container-highest rounded-full mx-auto" />
 

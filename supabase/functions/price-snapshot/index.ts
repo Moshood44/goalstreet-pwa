@@ -32,16 +32,28 @@ Deno.serve(async (req: Request) => {
       cachedData = data;
       lastCacheTime = now;
 
-      // Check if FPL data is older than 15 minutes
+      // Show delayed banner ONLY when:
+      // 1. A real fixture is inside its match window (live or kickoff +/- 3 hours)
+      // AND 2. Last good FPL fetch is more than 15 minutes old
       try {
         const { data: cacheRow } = await supabase
           .from("fpl_cache")
-          .select("updated_at")
-          .eq("key", "fpl_bootstrap")
-          .single();
+          .select("fetched_at, updated_at")
+          .eq("key", "fpl_fixtures")
+          .maybeSingle();
 
-        if (cacheRow && now - new Date(cacheRow.updated_at).getTime() > 15 * 60 * 1000) {
-          isDataDelayed = true;
+        const lastFetch = cacheRow?.fetched_at || cacheRow?.updated_at;
+        const isFetchOld = !lastFetch || (now - new Date(lastFetch).getTime() > 15 * 60 * 1000);
+
+        if (isFetchOld) {
+          const { count } = await supabase
+            .from("matches")
+            .select("id", { count: "exact", head: true })
+            .or("status.eq.live,status.eq.scheduled")
+            .gte("match_date", new Date(now - 3 * 3600 * 1000).toISOString())
+            .lte("match_date", new Date(now + 15 * 60 * 1000).toISOString());
+
+          isDataDelayed = (count ?? 0) > 0;
         } else {
           isDataDelayed = false;
         }

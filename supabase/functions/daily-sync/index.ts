@@ -6,10 +6,12 @@ import {
   FplBootstrap,
   FplFixture,
 } from "../_shared/fpl.ts";
+import { verifyAdminRequest } from "../_shared/adminAuth.ts";
+import { ApiFootballClient } from "../_shared/apiFootball.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-secret",
 };
 
 Deno.serve(async (req: Request) => {
@@ -21,6 +23,14 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const isAdmin = await verifyAdminRequest(req, supabase);
+    if (!isAdmin) {
+      return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing admin secret" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // 1. Fetch Bootstrap-Static (cache for 10 minutes)
     const { data: bootstrap, isDelayed } = await getCachedFplData<FplBootstrap>(
@@ -61,10 +71,6 @@ Deno.serve(async (req: Request) => {
       const pos = mapPositionType(el.element_type);
       const teamInfo = teamMap.get(el.team) || { name: "Premier League", shortName: "PL" };
       const minutesThisSeason = el.minutes || 0;
-
-      // Filter: Players with at least 180 minutes or selected by users or high profile
-      // Also list if they have minutes or are first-team squad members
-      const hasEnoughMinutes = minutesThisSeason >= 90 || el.total_points > 10 || el.now_cost >= 50;
 
       const n = Math.min(38, minutesThisSeason / 90.0);
       let listingPrice = 0.6000;
@@ -111,7 +117,7 @@ Deno.serve(async (req: Request) => {
         if (p.fpl_id && !activeFplIds.has(p.fpl_id) && !p.is_delisted) {
           await supabase.from("players").update({
             is_delisted: true,
-            status: "active", // Sell-only mode
+            status: "active",
             updated_at: new Date().toISOString(),
           }).eq("id", p.id);
           playersDelisted++;
@@ -149,7 +155,6 @@ Deno.serve(async (req: Request) => {
           away_score: f.team_a_score ?? 0,
         };
 
-        // Find or insert into matches
         const { data: existingMatch } = await supabase
           .from("matches")
           .select("id")
@@ -166,12 +171,80 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // 6. Optional: API-Football enhancement for shirt numbers & player map
+    const apiFootball = new ApiFootballClient(supabase);
+    const apiFootballKey = await apiFootball.getKey();
+    let apiFootballSquadsSynced = 0;
+
+    if (apiFootballKey && (await apiFootball.canMakeRequest())) {
+      // Find up to 2 clubs missing shirt numbers to enhance within daily budget
+      const { data: playersMissingNumber } = await supabase
+        .from("players")
+        .select("club")
+        .or("shirt_number.is.null,shirt_number.eq.0")
+        .limit(20);
+
+      const targetClubs = Array.from(new Set(playersMissingNumber?.map((p) => p.club) || [])).slice(0, 2);
+
+      for (const clubName of targetClubs) {
+        if (!(await apiFootball.canMakeRequest())) break;
+        // Search team ID
+        const searchRes = await apiFootball.fetchEndpoint<any>("teams", {
+          name: clubName,
+          league: "39",
+          season: "2024",
+        });
+
+        const teamId = searchRes?.response?.[0]?.team?.id;
+        if (teamId) {
+          const squadRes = await apiFootball.fetchEndpoint<any>("players/squads", {
+            team: String(teamId),
+          });
+
+          const squad = squadRes?.response?.[0]?.players || [];
+          for (const sp of squad) {
+            if (sp.number && sp.name) {
+              const norm = apiFootball.normalizeName(sp.name);
+              // Update player_map and players table
+              const { data: matchPlayer } = await supabase
+                .from("players")
+                .select("id, fpl_id")
+                .eq("club", clubName)
+                .ilike("full_name", `%${sp.name.split(" ").pop()}%`)
+                .maybeSingle();
+
+              if (matchPlayer) {
+                await supabase
+                  .from("players")
+                  .update({ shirt_number: sp.number, jersey_number: sp.number })
+                  .eq("id", matchPlayer.id);
+
+                await supabase.from("player_map").upsert(
+                  {
+                    fpl_id: matchPlayer.fpl_id,
+                    api_football_id: sp.id,
+                    team_name: clubName,
+                    normalized_name: norm,
+                    shirt_number: sp.number,
+                    updated_at: new Date().toISOString(),
+                  },
+                  { onConflict: "fpl_id" }
+                );
+              }
+            }
+          }
+          apiFootballSquadsSynced++;
+        }
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         playersUpserted,
         playersDelisted,
         fixturesSynced,
+        apiFootballSquadsSynced,
         dataDelayed: isDelayed,
         timestamp: new Date().toISOString(),
       }),
