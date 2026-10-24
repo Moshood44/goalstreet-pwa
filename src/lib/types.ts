@@ -32,6 +32,8 @@ export interface Profile {
   recovery_code_hash?: string;
   failed_pin_attempts?: number;
   locked_until?: string | null;
+  streak_days?: number;
+  last_trade_date?: string | null;
   created_at?: string;
 }
 

@@ -109,7 +109,7 @@ export const PortfolioPage: React.FC = () => {
           </div>
 
           {holdings.length === 0 ? (
-            /* Empty State matching screen 2ae6307caa22416a9f5f4646b83b4e9a */
+            /* Empty State matching portfolio screen */
             <div className="w-full bg-surface-container-lowest rounded-3xl p-8 shadow-[0_2px_0_0_#E9E8E4] flex flex-col items-center text-center gap-3 my-2">
               <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center text-3xl">
                 ⚽

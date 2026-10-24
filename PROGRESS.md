@@ -32,9 +32,16 @@
   - GitHub repo pushed and up to date on `Moshood44/goalstreet-pwa` `main`.
   - Cloudflare Pages live production deployment complete at: **https://goalstreet.pages.dev**
 
+- **Phase A: Save & Ship Completed**
+  - Secrets audit passed (no literal API-Football keys, hex tokens, or eyJ fallbacks in repository).
+  - Built production bundle with Vite PWA precache.
+  - Deployed to Cloudflare Pages live at **https://goalstreet.pages.dev**.
+
 ## In progress
-- None (All stages 0 through 6 completed).
+- **Phase B1**: Wire remaining mock-data pages to Supabase (Player Compare, Watchlist alerts, Order History realized PnL, Challenges, Trader XP, Notifications, Leaderboard, Matchday Ticker).
 
 ## Remaining
-- None. App is live, installable, and fully testable in production.
+- **Phase B2**: Dynamic gameweek copy, disabled European leagues ("Coming soon"), cleanup obsolete links.
+- **Phase B3**: Responsive 3-tier layout validation (mobile bottom tabs, tablet rail, desktop wide market + right persistent panel).
+- **Phase B4**: Verify pg_cron jobs and real System Status data.
 

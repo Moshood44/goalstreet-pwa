@@ -1,13 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { TactileButton } from '../components/ui/TactileButton';
+import { supabase } from '../lib/supabase';
 
 export const TraderXpPage: React.FC = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const [xpHistory, setXpHistory] = useState<{event_type:string;xp_amount:number;description:string;created_at:string}[]>([]);
 
-  const xp = profile?.xp || 100;
+  const xp = profile?.xp || 0;
+  const streak = profile?.streak_days || 0;
+
+  useEffect(() => {
+    if (profile?.id) {
+      supabase.from('xp_events').select('event_type,xp_amount,description,created_at').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(10).then(({ data }) => { if (data) setXpHistory(data); });
+    }
+  }, [profile?.id]);
 
   const tiers = [
     { name: 'Rookie', minXp: 0, maxXp: 250, badge: '🌱', perk: 'Standard 10,000 Caps Bankroll' },
@@ -123,6 +131,31 @@ export const TraderXpPage: React.FC = () => {
             })}
           </div>
         </section>
+        {/* Streak Card */}
+        <section className="w-full bg-surface-container-lowest rounded-3xl p-4 shadow-[0_2px_0_0_#E9E8E4] flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🔥</span>
+            <div>
+              <span className="font-headline-sm text-sm text-on-surface font-bold">{streak} Day Streak</span>
+              <p className="text-xs text-on-surface-variant">Trade daily to keep your streak alive</p>
+            </div>
+          </div>
+          <span className="font-label-data-sm text-xs text-tertiary-container font-bold">{streak > 0 ? '+' + (streak * 5) + ' XP bonus' : 'No streak'}</span>
+        </section>
+
+        {/* Recent XP Events */}
+        {xpHistory.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <h3 className="font-headline-sm text-xs text-on-surface-variant font-bold uppercase tracking-wider">Recent XP Events</h3>
+            {xpHistory.map((ev, i) => (
+              <div key={i} className="flex items-center justify-between text-xs bg-surface-container-lowest rounded-xl px-3 py-2 shadow-sm">
+                <span className="text-on-surface-variant truncate">{ev.description || ev.event_type}</span>
+                <span className="font-bold text-primary ml-2">+{ev.xp_amount} XP</span>
+              </div>
+            ))}
+          </section>
+        )}
+
       </main>
     </div>
   );
