@@ -1,17 +1,20 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import {
-  computeFplMatchScore,
-  calculateRatingFromScore,
-  computeWeightForMinutes,
-} from "../_shared/fpl.ts";
+import { Worldcup26Provider } from "../_shared/worldcup26.ts";
+import { FplProvider } from "../_shared/fplProvider.ts";
 import { verifyAdminRequest } from "../_shared/adminAuth.ts";
-import { ApiFootballClient } from "../_shared/apiFootball.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-secret",
 };
+
+function computeMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -25,223 +28,165 @@ Deno.serve(async (req: Request) => {
 
     const isAdmin = await verifyAdminRequest(req, supabase);
     if (!isAdmin) {
-      return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing admin secret" }), {
+      return new Response(JSON.stringify({ error: "Unauthorized: Invalid admin secret" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const now = new Date();
+    const worldcup26 = new Worldcup26Provider(supabase);
+    const fpl = new FplProvider(supabase);
 
-    // 1. Check if we are inside a Match Window
-    const { data: todayMatches } = await supabase
-      .from("matches")
-      .select("*")
-      .gte("match_date", new Date(now.getTime() - 24 * 3600 * 1000).toISOString())
-      .lte("match_date", new Date(now.getTime() + 24 * 3600 * 1000).toISOString());
-
-    let isMatchWindow = false;
+    // 1. Fetch real scores & live match status from Primary Provider (worldcup26)
+    const matches = await worldcup26.getMatches("eng.1");
+    let matchesUpdated = 0;
     let liveMatchCount = 0;
 
-    if (todayMatches && todayMatches.length > 0) {
-      for (const m of todayMatches) {
-        const kickTime = new Date(m.match_date).getTime();
-        const startWindow = kickTime - 10 * 60 * 1000; // 10 mins before kickoff
-        const endWindow = kickTime + 3 * 3600 * 1000;   // 3 hours after kickoff
-        const nowMs = now.getTime();
+    for (const m of matches) {
+      if (m.status === "live") liveMatchCount++;
 
-        if (nowMs >= startWindow && nowMs <= endWindow) {
-          isMatchWindow = true;
-          if (m.status === "live") liveMatchCount++;
-        }
+      // Upsert into fixture_link
+      await supabase.from("fixture_link").upsert({
+        worldcup26_event_id: m.worldcup26_event_id,
+        home_club: m.home_club,
+        away_club: m.away_club,
+        kickoff_time: m.kickoff_time,
+        status: m.status,
+        state: m.state,
+        display_clock: m.display_clock,
+        home_score: m.home_score,
+        away_score: m.away_score,
+        last_synced_at: m.last_synced_at,
+      }, { onConflict: "worldcup26_event_id" });
+
+      // Keep matches table aligned for frontend compatibility
+      const { data: existingMatch } = await supabase
+        .from("matches")
+        .select("id")
+        .eq("home_club", m.home_club)
+        .eq("away_club", m.away_club)
+        .maybeSingle();
+
+      const matchData = {
+        home_club: m.home_club,
+        away_club: m.away_club,
+        match_date: m.kickoff_time,
+        status: m.status,
+        state: m.state,
+        display_clock: m.display_clock,
+        current_minute: parseInt(m.display_clock.replace("'", "")) || 0,
+        home_score: m.home_score,
+        away_score: m.away_score,
+        last_synced_at: m.last_synced_at,
+        worldcup26_event_id: m.worldcup26_event_id,
+      };
+
+      if (existingMatch) {
+        await supabase.from("matches").update(matchData).eq("id", existingMatch.id);
+      } else {
+        await supabase.from("matches").insert(matchData);
+      }
+      matchesUpdated++;
+    }
+
+    // 2. Lock players for any LIVE matches
+    const liveMatches = matches.filter((m) => m.status === "live");
+    if (liveMatches.length > 0) {
+      for (const lm of liveMatches) {
+        await supabase
+          .from("players")
+          .update({ status: "locked", updated_at: new Date().toISOString() })
+          .in("club", [lm.home_club, lm.away_club]);
       }
     }
 
-    let actionsPerformed: string[] = [];
-    const apiFootball = new ApiFootballClient(supabase);
-
-    // 2. Fetch rating calibration
-    const { data: calRows } = await supabase.from("rating_calibration").select("*");
-    const calMap: Record<string, { mean: number; std: number }> = {};
-    if (calRows) {
-      for (const row of calRows) {
-        calMap[row.position] = { mean: parseFloat(row.mean), std: parseFloat(row.std) };
+    // 3. Unlock players if their match is finished (state === 'post' or status === 'finished')
+    const finishedMatches = matches.filter((m) => m.status === "finished");
+    if (finishedMatches.length > 0) {
+      for (const fm of finishedMatches) {
+        await supabase
+          .from("players")
+          .update({ status: "active", updated_at: new Date().toISOString() })
+          .in("club", [fm.home_club, fm.away_club])
+          .eq("status", "locked");
       }
     }
 
-    if (isMatchWindow) {
-      actionsPerformed.push("Inside match window: checking live matches and settlements");
+    // 4. Real FPL Ratings computation:
+    // Determine current gameweek from FPL bootstrap-static
+    let ratingsProcessed = 0;
+    const { data: bootstrap } = await fpl.fetchEndpoint<any>("bootstrap-static/");
+    const currentEvent = bootstrap?.events?.find((e: any) => e.is_current) || bootstrap?.events?.find((e: any) => e.is_next);
+    const currentGw = currentEvent?.id;
 
-      // Check for live fixtures and lock players
-      const { data: liveMatches } = await supabase
-        .from("matches")
-        .select("*")
-        .eq("status", "live");
+    if (currentGw) {
+      const { data: liveData } = await fpl.fetchEndpoint<any>(`event/${currentGw}/live/`);
+      if (liveData?.elements && Array.isArray(liveData.elements)) {
+        // Group players by fixture to compute median BPS per fixture
+        const fixtureBpsMap: Record<number, number[]> = {};
 
-      if (liveMatches && liveMatches.length > 0) {
-        for (const match of liveMatches) {
-          await supabase
-            .from("players")
-            .update({ status: "locked", updated_at: new Date().toISOString() })
-            .in("club", [match.home_club, match.away_club]);
+        for (const el of liveData.elements) {
+          const stats = el.stats;
+          if (stats && stats.minutes > 0) {
+            const fId = el.explain?.[0]?.fixture || 0;
+            if (!fixtureBpsMap[fId]) fixtureBpsMap[fId] = [];
+            fixtureBpsMap[fId].push(stats.bps || 0);
+          }
         }
-        actionsPerformed.push(`Locked active players for ${liveMatches.length} live matches`);
-      }
 
-      // Check finished fixtures needing settlement
-      const { data: finishedMatches } = await supabase
-        .from("matches")
-        .select("*")
-        .eq("status", "finished")
-        .order("match_date", { ascending: false })
-        .limit(10);
+        // Calculate medians
+        const fixtureMedians: Record<number, number> = {};
+        for (const [fId, bpsList] of Object.entries(fixtureBpsMap)) {
+          fixtureMedians[Number(fId)] = computeMedian(bpsList);
+        }
 
-      if (finishedMatches) {
-        for (const f of finishedMatches) {
-          const { data: matchPlayers } = await supabase
-            .from("players")
-            .select("*")
-            .in("club", [f.home_club, f.away_club]);
+        // Process ratings for players who played minutes
+        for (const el of liveData.elements) {
+          const stats = el.stats;
+          if (stats && stats.minutes > 0) {
+            const fId = el.explain?.[0]?.fixture || 0;
+            const medianBps = fixtureMedians[fId] || 15;
 
-          if (matchPlayers) {
-            for (const p of matchPlayers) {
-              const fixtureKey = String(f.id);
+            const provisionalRating = fpl.computeProvisionalRating({
+              minutes: stats.minutes,
+              bps: stats.bps,
+              ict_index: parseFloat(stats.ict_index || "0"),
+              expected_goals: parseFloat(stats.expected_goals || "0"),
+              expected_assists: parseFloat(stats.expected_assists || "0"),
+            }, medianBps);
 
-              const { data: existingRating } = await supabase
-                .from("match_ratings")
-                .select("id, settled")
-                .eq("fixture_id", fixtureKey)
-                .eq("player_id", p.id)
-                .maybeSingle();
+            // Update player's last_match_rating with provisional rating
+            const { data: existingPlayer } = await supabase
+              .from("players")
+              .select("id, base_price, crowd_premium")
+              .eq("fpl_id", el.id)
+              .maybeSingle();
 
-              if (!existingRating || !existingRating.settled) {
-                let matchRating = p.last_match_rating || 7.0;
-
-                // Check API-Football for per-fixture rating if key available
-                if (await apiFootball.canMakeRequest()) {
-                  const apiRes = await apiFootball.fetchEndpoint<any>("fixtures/players", {
-                    fixture: fixtureKey,
-                    team: p.club,
-                  });
-                  const pStat = apiRes?.response?.[0]?.players?.find(
-                    (item: any) => apiFootball.normalizeName(item.player.name) === apiFootball.normalizeName(p.name)
-                  );
-                  if (pStat?.statistics?.[0]?.games?.rating) {
-                    const parsed = parseFloat(pStat.statistics[0].games.rating);
-                    if (!isNaN(parsed) && parsed > 0) {
-                      matchRating = parsed;
-                    }
-                  }
-                }
-
-                const minutesPlayed = 90;
-                const weight = computeWeightForMinutes(minutesPlayed);
-                const oldBase = parseFloat(p.base_price);
-                const targetBase = (oldBase + matchRating / 10.0) / 2.0;
-                const newBase = Math.max(
-                  0.0100,
-                  Math.min(1.0000, Math.round((oldBase + weight * (targetBase - oldBase)) * 10000) / 10000)
-                );
-
-                await supabase.from("players").update({
-                  base_price: newBase,
-                  status: "active",
-                  last_rating_change: Math.round((newBase - oldBase) * 10000) / 10000,
+            if (existingPlayer) {
+              await supabase
+                .from("players")
+                .update({
+                  last_match_rating: provisionalRating,
                   updated_at: new Date().toISOString(),
-                }).eq("id", p.id);
+                })
+                .eq("id", existingPlayer.id);
 
-                await supabase.from("match_ratings").upsert({
-                  match_id: f.id,
-                  fixture_id: fixtureKey,
-                  player_id: p.id,
-                  rating: matchRating,
-                  minutes_played: minutesPlayed,
-                  settled: true,
-                }, { onConflict: "fixture_id,player_id" });
-
-                const currentDisplayed = Math.round(newBase * (1.0 + parseFloat(p.crowd_premium)) * 10000) / 10000;
-                await supabase.from("price_history").insert({
-                  player_id: p.id,
-                  price: currentDisplayed,
-                });
-
-                const { data: holders } = await supabase
-                  .from("holdings")
-                  .select("user_id")
-                  .eq("player_id", p.id);
-
-                if (holders) {
-                  for (const h of holders) {
-                    await supabase.from("notifications").insert({
-                      user_id: h.user_id,
-                      title: `Match Settled: ${p.name} ★ ${matchRating}`,
-                      message: `${p.name} settled at 🧢 ${newBase.toFixed(4)} (${newBase >= oldBase ? '+' : ''}${((newBase - oldBase) * 100).toFixed(2)}%)`,
-                      type: "trade",
-                    });
-                  }
-                }
-              }
+              ratingsProcessed++;
             }
           }
         }
       }
-    } else {
-      actionsPerformed.push("Outside match window: running crowd decay & drift");
-
-      // 3. Crowd Premium Decay (~25% fade per day -> factor 0.9998 per minute)
-      const { data: activePlayers } = await supabase
-        .from("players")
-        .select("id, base_price, net_buying_caps, crowd_premium")
-        .order("base_price", { ascending: false })
-        .limit(20);
-
-      if (activePlayers) {
-        for (const p of activePlayers) {
-          const oldNet = parseFloat(p.net_buying_caps || "0");
-          if (Math.abs(oldNet) > 1.0) {
-            const newNet = oldNet * 0.9998;
-            const newPremium = Math.round(0.15 * Math.tanh(newNet / 200000.0) * 10000) / 10000;
-
-            await supabase.from("players").update({
-              net_buying_caps: newNet,
-              crowd_premium: newPremium,
-              updated_at: new Date().toISOString(),
-            }).eq("id", p.id);
-          }
-        }
-      }
-
-      // 4. Drift random players slightly (1-3% volume)
-      const { data: randomSample } = await supabase
-        .from("players")
-        .select("id, name, base_price, net_buying_caps")
-        .eq("status", "active")
-        .limit(3);
-
-      if (randomSample && randomSample.length > 0) {
-        for (const p of randomSample) {
-          const driftDirection = Math.random() > 0.5 ? 1 : -1;
-          const driftAmount = Math.round((Math.random() * 50 + 10) * driftDirection);
-          const currentNet = parseFloat(p.net_buying_caps || "0");
-          const nextNet = currentNet + driftAmount;
-          const nextPremium = Math.round(0.15 * Math.tanh(nextNet / 200000.0) * 10000) / 10000;
-
-          await supabase.from("players").update({
-            net_buying_caps: nextNet,
-            crowd_premium: nextPremium,
-            updated_at: new Date().toISOString(),
-          }).eq("id", p.id);
-        }
-        actionsPerformed.push(`Drift applied to ${randomSample.length} random players`);
-      }
     }
+
+    // Note: Random micro-drift and synthetic noise completely deleted.
+    // Price movement only occurs on real trade execution and full-time settlement.
 
     return new Response(
       JSON.stringify({
         success: true,
-        isMatchWindow,
+        matchesUpdated,
         liveMatchCount,
-        actionsPerformed,
+        ratingsProcessed,
         timestamp: new Date().toISOString(),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

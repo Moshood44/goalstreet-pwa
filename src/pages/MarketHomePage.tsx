@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useMarket } from '../context/MarketContext';
 import { Player } from '../lib/types';
-import { formatCaps, formatPrice, formatPercent } from '../lib/utils';
+import { formatCaps, formatPercent } from '../lib/utils';
 import { PricePill } from '../components/ui/PricePill';
 import { JerseyAvatar } from '../components/ui/JerseyAvatar';
 import { Sparkline } from '../components/ui/Sparkline';
@@ -27,11 +27,6 @@ export const MarketHomePage: React.FC = () => {
   const [selectedPosition, setSelectedPosition] = useState<string>('ALL');
   const [selectedFilter, setSelectedFilter] = useState<'ALL' | 'RISING' | 'FALLING' | 'LIVE'>('ALL');
   const [selectedPlayerForTrade, setSelectedPlayerForTrade] = useState<Player | null>(null);
-
-  // New listings row (players added or newly listed)
-  const newListings = useMemo(() => {
-    return players.slice(10, 16);
-  }, [players]);
 
   // Filtered players
   const filteredPlayers = useMemo(() => {
@@ -86,7 +81,7 @@ export const MarketHomePage: React.FC = () => {
               </span>
             </div>
             <button
-              onClick={() => navigate('/me')}
+              onClick={() => navigate('/profile')}
               className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-[0_2px_0_0_#4500D8] active:translate-y-0.5"
             >
               <span className="material-symbols-outlined text-[18px]">person</span>
@@ -106,222 +101,112 @@ export const MarketHomePage: React.FC = () => {
               <span className="text-secondary font-bold">⚠️</span>
               <span className="font-medium text-[11px] text-on-surface-variant">FPL sync delayed (&gt;15m). Serving last verified prices.</span>
             </div>
-            <span className="text-[10px] bg-secondary-fixed/50 text-on-secondary-fixed px-2 py-0.5 rounded-full font-bold">Data delayed</span>
+            <span className="text-[10px] bg-secondary-container text-on-secondary-container font-bold px-2 py-0.5 rounded-full">
+              Safe Mode
+            </span>
           </div>
         )}
 
-        {/* Greeting & Bento Balance Card */}
-        <section className="flex flex-col gap-2.5">
+        {/* Portfolio Net Worth Hero Bento */}
+        <section className="w-full bg-surface-container-lowest rounded-3xl p-5 shadow-[0_4px_16px_rgba(30,27,46,0.06),0_3px_0_0_#E9E8E4] flex flex-col gap-3">
           <div className="flex items-center justify-between">
+            <span className="font-label-ui text-xs text-on-surface-variant font-bold uppercase tracking-wider">
+              Portfolio Net Worth
+            </span>
+            <span className="font-label-ui text-[11px] text-tertiary-container font-bold bg-tertiary-container/10 px-2 py-0.5 rounded-full">
+              Gameweek 11 Live
+            </span>
+          </div>
+
+          <div className="flex items-baseline gap-2">
+            <span className="font-display-lg text-3xl text-on-surface font-black tracking-tight">
+              🧢 {formatCaps(portfolioNetWorth)}
+            </span>
+            <span className="font-label-data-sm text-xs font-bold text-tertiary-container">
+              +0.0%
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-surface-container">
             <div className="flex flex-col">
-              <h2 className="font-headline-md text-lg text-on-surface tracking-tight font-bold">
-                Hey {username} 👋
-              </h2>
-              <p className="font-body-sm text-xs text-on-surface-variant">
-                Transfer window is open & pumping
-              </p>
+              <span className="text-[11px] text-on-surface-variant">Cash Liquidity:</span>
+              <span className="font-label-data-sm text-xs font-bold text-on-surface">
+                🧢 {formatCaps(availableLiquidity, 0)}
+              </span>
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high">
-              <span className="inline-block w-2 h-2 rounded-full bg-tertiary-container animate-pulse" />
-              <span className="font-label-ui text-[11px] text-on-surface font-bold">
-                Market Live
+            <div className="flex flex-col items-end">
+              <span className="text-[11px] text-on-surface-variant">Holdings:</span>
+              <span className="font-label-data-sm text-xs font-bold text-on-surface">
+                🧢 {formatCaps(portfolioNetWorth - availableLiquidity, 0)}
               </span>
             </div>
           </div>
-
-          {/* Tactile Bento Net Worth Card */}
-          <div className="w-full bg-surface-container-lowest rounded-3xl p-4 shadow-[0_4px_16px_rgba(30,27,46,0.06),0_3px_0_0_#E9E8E4] flex flex-col gap-3">
-            <div className="flex items-start justify-between">
-              <div className="flex flex-col">
-                <span className="font-label-ui text-xs text-on-surface-variant">
-                  Total Portfolio Net Worth
-                </span>
-                <div className="flex items-baseline gap-1 mt-0.5">
-                  <span className="text-xl">🧢</span>
-                  <span className="font-display-lg text-2xl text-on-surface font-extrabold tracking-tight">
-                    {formatCaps(portfolioNetWorth)}
-                  </span>
-                  <span className="font-label-ticker text-xs text-on-surface-variant">
-                    Caps
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container text-tertiary-container font-label-data-sm text-xs font-bold shadow-sm">
-                <span>▲</span>
-                <span>+0.00%</span>
-                <span className="text-[10px] text-on-surface-variant font-normal">7d</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between bg-surface-container-low px-3 py-2 rounded-2xl">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm">⚡</span>
-                <span className="font-label-ui text-xs text-on-surface-variant font-medium">
-                  Available Cash:
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-xs">🧢</span>
-                <span className="font-label-data-sm text-xs text-on-surface font-bold">
-                  {formatCaps(availableLiquidity)}
-                </span>
-                <span className="font-label-ui text-[10px] text-tertiary-container font-bold uppercase tracking-wider ml-1">
-                  Ready
-                </span>
-              </div>
-            </div>
-          </div>
         </section>
 
-        {/* Search Bar */}
-        <section className="relative w-full h-12 bg-surface-container-lowest rounded-2xl flex items-center px-3.5 shadow-[0_2px_0_0_#E9E8E4]">
-          <span className="material-symbols-outlined text-outline text-[20px] shrink-0">
-            search
-          </span>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search players, clubs or positions..."
-            className="w-full bg-transparent px-2.5 text-xs text-on-surface placeholder:text-outline focus:outline-none font-medium"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="text-outline text-xs p-1">
-              ✕
-            </button>
-          )}
-        </section>
-
-        {/* League Selector Bar */}
-        <section className="w-full bg-surface-container rounded-2xl p-1 flex items-center gap-1 shadow-inner">
-          <button className="flex-1 py-1.5 px-2 rounded-xl bg-surface-container-lowest font-headline-sm text-xs text-primary shadow-sm flex items-center justify-center gap-1.5 font-bold">
-            <span>🏴󠁧󠁢󠁥󠁮󠁧󠁿</span> Premier League
+        {/* Competitions / Leagues Filter Tabs */}
+        <section className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+          <button className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-primary text-on-primary shrink-0 shadow-sm">
+            Premier League
           </button>
-          <button className="flex-1 py-1.5 px-2 rounded-xl font-label-ui text-xs text-on-surface-variant flex items-center justify-center gap-1.5">
-            <span>🇪🇸</span> La Liga
+          <button disabled className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-surface-container text-outline opacity-60 shrink-0 cursor-not-allowed">
+            La Liga (Coming soon)
           </button>
-          <button className="flex-1 py-1.5 px-2 rounded-xl font-label-ui text-xs text-on-surface-variant flex items-center justify-center gap-1.5">
-            <span>⭐</span> UCL
+          <button disabled className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-surface-container text-outline opacity-60 shrink-0 cursor-not-allowed">
+            UEFA Champions League (Coming soon)
           </button>
         </section>
 
-        {/* Position & Special Filter Chips */}
-        <section className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
-          {['ALL', 'FWD', 'MID', 'DEF', 'GK'].map((pos) => (
-            <button
-              key={pos}
-              onClick={() => setSelectedPosition(pos)}
-              className={`shrink-0 h-7 px-3 rounded-full text-xs font-bold transition-all ${
-                selectedPosition === pos
-                  ? 'bg-primary-container text-on-primary shadow-[0_2px_0_0_#4500D8] translate-y-0.5'
-                  : 'bg-surface-container-lowest text-on-surface-variant shadow-[0_2px_0_0_#E9E8E4]'
-              }`}
-            >
-              {pos}
-            </button>
-          ))}
-
-          <button
-            onClick={() => setSelectedFilter(selectedFilter === 'RISING' ? 'ALL' : 'RISING')}
-            className={`shrink-0 h-7 px-3 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
-              selectedFilter === 'RISING'
-                ? 'bg-tertiary-container text-on-tertiary shadow-[0_2px_0_0_#005321]'
-                : 'bg-surface-container-lowest text-on-surface-variant shadow-[0_2px_0_0_#E9E8E4]'
-            }`}
-          >
-            <span>🚀</span> Rising
-          </button>
-
-          <button
-            onClick={() => setSelectedFilter(selectedFilter === 'FALLING' ? 'ALL' : 'FALLING')}
-            className={`shrink-0 h-7 px-3 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
-              selectedFilter === 'FALLING'
-                ? 'bg-error text-on-error shadow-[0_2px_0_0_#93000A]'
-                : 'bg-surface-container-lowest text-on-surface-variant shadow-[0_2px_0_0_#E9E8E4]'
-            }`}
-          >
-            <span>📉</span> Falling
-          </button>
-
-          <button
-            onClick={() => setSelectedFilter(selectedFilter === 'LIVE' ? 'ALL' : 'LIVE')}
-            className={`shrink-0 h-7 px-3 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${
-              selectedFilter === 'LIVE'
-                ? 'bg-error text-on-error shadow-[0_2px_0_0_#93000A]'
-                : 'bg-surface-container-lowest text-error shadow-[0_2px_0_0_#E9E8E4]'
-            }`}
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-error animate-ping" />
-            Live Matches
-          </button>
-        </section>
-
-        {/* New Listings Row (Replaced wonderkid IPOs as requested) */}
-        <section className="flex flex-col gap-2 pt-1">
-          <div className="flex items-center justify-between">
-            <span className="font-headline-sm text-sm text-on-surface font-bold flex items-center gap-1.5">
-              <span>🔥</span> New Listings
+        {/* Search & Position Filters */}
+        <section className="flex flex-col gap-2.5">
+          {/* Search Input */}
+          <div className="relative w-full">
+            <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-outline text-[20px]">
+              search
             </span>
-            <span className="text-[11px] text-primary font-bold">Live Order Books</span>
+            <input
+              type="text"
+              placeholder="Search athlete, club or position..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-11 pl-10 pr-4 bg-surface-container-lowest rounded-2xl text-xs font-medium text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-[0_2px_0_0_#E9E8E4]"
+            />
           </div>
 
-          <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
-            {newListings.map((p) => (
-              <div
-                key={p.id}
-                onClick={() => navigate(`/player/${p.id}`)}
-                className="shrink-0 w-36 bg-surface-container-lowest rounded-2xl p-3 shadow-[0_3px_0_0_#E9E8E4] flex flex-col gap-2 cursor-pointer active:scale-95 transition-transform"
+          {/* Position Selector Filter */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            {(['ALL', 'FWD', 'MID', 'DEF', 'GK'] as const).map((pos) => (
+              <button
+                key={pos}
+                onClick={() => setSelectedPosition(pos)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
+                  selectedPosition === pos
+                    ? 'bg-surface-container-lowest text-primary shadow-[0_2px_0_0_#4500D8]'
+                    : 'bg-surface-container-low text-on-surface-variant hover:text-on-surface'
+                }`}
               >
-                <div className="flex items-center justify-between">
-                  <JerseyAvatar jerseyNumber={p.jersey_number} position={p.position} size="sm" />
-                  <span className="text-[10px] font-bold text-on-surface-variant">
-                    {p.position}
-                  </span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-headline-sm text-xs text-on-surface font-bold truncate">
-                    {p.name}
-                  </span>
-                  <span className="text-[10px] text-on-surface-variant truncate">
-                    {p.club}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t border-surface-container">
-                  <PricePill price={p.current_price} size="sm" />
-                  <span
-                    className={`text-[10px] font-bold ${
-                      p.change_24h_pct >= 0 ? 'text-tertiary-container' : 'text-error'
-                    }`}
-                  >
-                    {formatPercent(p.change_24h_pct)}
-                  </span>
-                </div>
-              </div>
+                {pos}
+              </button>
             ))}
           </div>
         </section>
 
-        {/* Players Marketplace List */}
-        <section className="flex flex-col gap-2 pt-2">
-          <div className="flex items-center justify-between">
-            <h3 className="font-headline-sm text-sm text-on-surface font-bold">
-              Market Movers ({filteredPlayers.length})
-            </h3>
-            <span className="text-[11px] text-on-surface-variant">
-              House Fill • 0.5% Fee
-            </span>
+        {/* Player Market Listing */}
+        <section className="flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs text-on-surface-variant font-medium px-1">
+            <span>Market Assets ({filteredPlayers.length})</span>
+            <span>24h Change / Price</span>
           </div>
 
           <div className="flex flex-col gap-2.5">
-            {filteredPlayers.map((player) => {
-              const isLocked = player.status === 'locked';
+            {filteredPlayers.slice(0, 50).map((player) => {
               const direction = priceDirections[player.id] || 'same';
               const isFav = isWatchlisted(player.id);
+              const isLocked = player.status === 'locked';
 
               return (
                 <div
                   key={player.id}
-                  className="w-full bg-surface-container-lowest rounded-2xl p-3.5 shadow-[0_2px_0_0_#E9E8E4] flex items-center justify-between gap-3 transition-transform active:scale-[0.99]"
+                  className="w-full bg-surface-container-lowest rounded-2xl p-3 shadow-[0_2px_0_0_#E9E8E4] flex items-center justify-between gap-3 hover:bg-surface-container-low transition-colors"
                 >
                   {/* Left: Avatar & Info */}
                   <div
@@ -352,31 +237,20 @@ export const MarketHomePage: React.FC = () => {
                         <span className="font-semibold">{player.position}</span>
                       </div>
 
-                      {/* Last Match Rating Tracker (Replacing dividend tracker) */}
                       <div className="flex items-center gap-1.5 mt-1 text-[11px]">
                         <span className="text-secondary font-bold">
-                          ★ {player.last_match_rating.toFixed(1)}
+                          ★ {player.last_match_rating ? player.last_match_rating.toFixed(1) : 'n/a'}
                         </span>
-                        <span className="text-on-surface-variant">Match Rating</span>
-                        <span
-                          className={`font-semibold ${
-                            player.last_rating_change >= 0
-                              ? 'text-tertiary-container'
-                              : 'text-error'
-                          }`}
-                        >
-                          ({player.last_rating_change >= 0 ? '+' : ''}
-                          {player.last_rating_change.toFixed(4)} 🧢)
-                        </span>
+                        <span className="text-on-surface-variant">Rating</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Right: Sparkline, Price, Trade Action */}
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-2.5 shrink-0">
                     <Sparkline
                       isPositive={player.change_24h_pct >= 0}
-                      width={48}
+                      width={44}
                       height={20}
                     />
 

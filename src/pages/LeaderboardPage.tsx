@@ -17,48 +17,11 @@ export const LeaderboardPage: React.FC = () => {
     supabase
       .rpc('get_leaderboard', { p_type: boardType })
       .then(({ data, error }) => {
-        if (!error && data) {
+        if (!error && data && Array.isArray(data)) {
           setEntries(data);
         } else {
-          // Demo fallback entries if only 1 user exists
-          setEntries([
-            {
-              rank_num: 1,
-              user_id: 'mock-1',
-              username: 'ApexTrader_99',
-              portfolio_value: 14850.25,
-              starting_value: 10000.0,
-              return_pct: 48.5,
-              tier: 'Legend',
-            },
-            {
-              rank_num: 2,
-              user_id: 'mock-2',
-              username: 'HaalandHodler',
-              portfolio_value: 13240.0,
-              starting_value: 10000.0,
-              return_pct: 32.4,
-              tier: 'Elite',
-            },
-            {
-              rank_num: 3,
-              user_id: 'mock-3',
-              username: 'SakaSniper',
-              portfolio_value: 12100.5,
-              starting_value: 10000.0,
-              return_pct: 21.01,
-              tier: 'Pro',
-            },
-            {
-              rank_num: 4,
-              user_id: user?.id || 'me',
-              username: 'You',
-              portfolio_value: portfolioNetWorth,
-              starting_value: 10000.0,
-              return_pct: ((portfolioNetWorth - 10000) / 10000) * 100,
-              tier: 'Rookie',
-            },
-          ]);
+          // If no entries or error, show honest empty state (never synthetic demo rows)
+          setEntries([]);
         }
         setLoading(false);
       });
@@ -115,21 +78,21 @@ export const LeaderboardPage: React.FC = () => {
             <span className="text-base">⏳</span>
             <div className="flex flex-col">
               <span className="font-bold text-on-surface">
-                {boardType === 'weekly' ? 'Weekly Settlement' : 'Monthly Settlement'}
+                {boardType === 'weekly' ? 'Weekly Reset' : 'Monthly Reset'}
               </span>
-              <span className="text-on-surface-variant text-[11px]">
-                {boardType === 'weekly' ? 'Resets Monday 00:00 UTC' : 'Resets on the 1st'}
+              <span className="text-[10px] text-on-surface-variant">
+                {boardType === 'weekly' ? 'Every Monday at 00:00 UTC' : '1st of every month'}
               </span>
             </div>
           </div>
-          <span className="font-label-data-sm text-primary font-bold bg-primary/10 px-2 py-1 rounded-lg">
-            Active Round
+          <span className="font-label-ui text-[10px] text-primary font-bold bg-primary/10 px-2 py-0.5 rounded-full">
+            Active Period
           </span>
         </section>
 
-        {/* Top 3 Podium Highlights */}
+        {/* Podium Bento (Only if real entries exist) */}
         {entries.length >= 3 && (
-          <section className="grid grid-cols-3 gap-2 pt-1 items-end">
+          <section className="grid grid-cols-3 gap-2 items-end pt-2">
             {/* Rank 2 */}
             <div className="bg-surface-container-lowest rounded-2xl p-3 shadow-[0_2px_0_0_#E9E8E4] flex flex-col items-center text-center gap-1">
               <span className="text-xl">🥈</span>
@@ -181,67 +144,79 @@ export const LeaderboardPage: React.FC = () => {
             <span>Net Return / Balance</span>
           </div>
 
-          <div className="flex flex-col gap-2">
-            {entries.map((entry) => {
-              const isCurrentUser = entry.user_id === user?.id;
+          {entries.length === 0 ? (
+            <div className="w-full bg-surface-container-lowest rounded-3xl p-8 shadow-[0_2px_0_0_#E9E8E4] text-center my-2">
+              <span className="text-3xl">🏆</span>
+              <h3 className="font-headline-md text-sm text-on-surface font-bold mt-2">
+                No entries yet
+              </h3>
+              <p className="text-xs text-on-surface-variant mt-1">
+                Leaderboards update after scheduled weekly and monthly portfolio snapshots run.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {entries.map((entry) => {
+                const isCurrentUser = entry.user_id === user?.id;
 
-              return (
-                <div
-                  key={entry.rank_num + entry.user_id}
-                  className={`w-full rounded-2xl p-3 flex items-center justify-between gap-3 shadow-[0_2px_0_0_#E9E8E4] ${
-                    isCurrentUser
-                      ? 'bg-primary-fixed/40 border border-primary/40 font-bold'
-                      : 'bg-surface-container-lowest'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span
-                      className={`w-6 text-center font-display-lg text-sm font-extrabold ${
-                        entry.rank_num === 1
-                          ? 'text-secondary'
-                          : entry.rank_num === 2
-                          ? 'text-outline'
-                          : entry.rank_num === 3
-                          ? 'text-[#A05A2C]'
-                          : 'text-on-surface-variant'
-                      }`}
-                    >
-                      #{entry.rank_num}
-                    </span>
+                return (
+                  <div
+                    key={entry.rank_num + entry.user_id}
+                    className={`w-full rounded-2xl p-3 flex items-center justify-between gap-3 shadow-[0_2px_0_0_#E9E8E4] ${
+                      isCurrentUser
+                        ? 'bg-primary-fixed/40 border border-primary/40 font-bold'
+                        : 'bg-surface-container-lowest'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className={`w-6 text-center font-display-lg text-sm font-extrabold ${
+                          entry.rank_num === 1
+                            ? 'text-secondary'
+                            : entry.rank_num === 2
+                            ? 'text-outline'
+                            : entry.rank_num === 3
+                            ? 'text-[#A05A2C]'
+                            : 'text-on-surface-variant'
+                        }`}
+                      >
+                        #{entry.rank_num}
+                      </span>
 
-                    <div className="flex flex-col min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-headline-sm text-xs text-on-surface font-bold truncate">
-                          {entry.username}
-                        </span>
-                        {isCurrentUser && (
-                          <span className="bg-primary text-on-primary text-[9px] px-1.5 py-0.2 rounded-full font-bold">
-                            YOU
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-headline-sm text-xs text-on-surface font-bold truncate">
+                            {entry.username}
                           </span>
-                        )}
+                          {isCurrentUser && (
+                            <span className="bg-primary text-on-primary text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                              YOU
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-on-surface-variant">
+                          Tier: {entry.tier || 'Rookie'}
+                        </span>
                       </div>
-                      <span className="text-[10px] text-on-surface-variant">
-                        Tier: {entry.tier || 'Rookie'}
+                    </div>
+
+                    <div className="flex flex-col items-end">
+                      <span
+                        className={`font-label-data-sm text-xs font-black ${
+                          entry.return_pct >= 0 ? 'text-tertiary-container' : 'text-error'
+                        }`}
+                      >
+                        {formatPercent(entry.return_pct)}
+                      </span>
+                      <span className="text-[11px] text-on-surface font-medium">
+                        🧢 {formatCaps(entry.portfolio_value)}
                       </span>
                     </div>
                   </div>
-
-                  <div className="flex flex-col items-end">
-                    <span
-                      className={`font-label-data-sm text-xs font-black ${
-                        entry.return_pct >= 0 ? 'text-tertiary-container' : 'text-error'
-                      }`}
-                    >
-                      {formatPercent(entry.return_pct)}
-                    </span>
-                    <span className="text-[11px] text-on-surface font-medium">
-                      🧢 {formatCaps(entry.portfolio_value)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       </main>
     </div>

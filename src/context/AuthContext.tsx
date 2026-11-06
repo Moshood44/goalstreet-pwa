@@ -33,6 +33,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
       if (!error && data) {
         setProfile(data);
+
+        // Record server-side idempotent daily login XP and streak calculation
+        try {
+          await supabase.rpc('record_daily_login', { p_user_id: userId });
+        } catch (_err) {
+          // Non-blocking if table or RPC migration in flight
+        }
       }
     } catch (e) {
       console.error('Error fetching profile:', e);

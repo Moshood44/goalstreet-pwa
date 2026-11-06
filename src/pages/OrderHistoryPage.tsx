@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Order } from '../lib/types';
-import { formatCaps, formatPrice } from '../lib/utils';
+import { formatCaps, formatPrice, formatPercent } from '../lib/utils';
 import { JerseyAvatar } from '../components/ui/JerseyAvatar';
 
 export const OrderHistoryPage: React.FC = () => {
@@ -28,6 +28,9 @@ export const OrderHistoryPage: React.FC = () => {
 
   const totalVolume = orders.reduce((acc, o) => acc + parseFloat(o.gross_amount as any || 0), 0);
   const totalFees = orders.reduce((acc, o) => acc + parseFloat(o.fee as any || 0), 0);
+  const totalRealizedPnl = orders
+    .filter((o) => o.side === 'SELL')
+    .reduce((acc, o) => acc + (parseFloat(o.realized_pnl as any) || 0), 0);
 
   return (
     <div className="min-h-screen w-full bg-surface pb-28">
@@ -57,13 +60,15 @@ export const OrderHistoryPage: React.FC = () => {
             </span>
           </div>
           <div className="flex flex-col items-center border-x border-surface-container px-1">
-            <span className="text-on-surface-variant text-[11px]">Gross Volume:</span>
-            <span className="font-display-lg text-sm text-primary font-bold mt-0.5 truncate w-full">
-              🧢 {formatCaps(totalVolume, 0)}
+            <span className="text-on-surface-variant text-[11px]">Realized P&L:</span>
+            <span className={`font-display-lg text-sm font-bold mt-0.5 truncate w-full ${
+              totalRealizedPnl >= 0 ? 'text-tertiary-container' : 'text-error'
+            }`}>
+              {totalRealizedPnl >= 0 ? '+' : ''}🧢 {formatCaps(totalRealizedPnl, 1)}
             </span>
           </div>
           <div className="flex flex-col items-center">
-            <span className="text-on-surface-variant text-[11px]">Fees (0.5%):</span>
+            <span className="text-on-surface-variant text-[11px]">Trading Fees:</span>
             <span className="font-display-lg text-sm text-secondary font-bold mt-0.5 truncate w-full">
               🧢 {formatCaps(totalFees, 1)}
             </span>
@@ -87,6 +92,7 @@ export const OrderHistoryPage: React.FC = () => {
             orders.map((order) => {
               const isBuy = order.side === 'BUY';
               const player = order.player;
+              const pnl = parseFloat(order.realized_pnl as any || '0');
 
               return (
                 <div
@@ -126,11 +132,13 @@ export const OrderHistoryPage: React.FC = () => {
                     <span className="font-label-ticker text-xs text-on-surface font-bold">
                       🧢 {formatCaps(order.net_amount)}
                     </span>
-                    <span className="text-[10px] text-outline">
-                      Fee: 🧢 {formatCaps(order.fee, 2)}
-                    </span>
-                    <span className="text-[9px] text-on-surface-variant mt-0.5">
-                      {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {!isBuy && pnl !== 0 && (
+                      <span className={`text-[10px] font-bold ${pnl >= 0 ? 'text-tertiary-container' : 'text-error'}`}>
+                        P&L: {pnl >= 0 ? '+' : ''}🧢 {formatCaps(pnl, 2)}
+                      </span>
+                    )}
+                    <span className="text-[9px] text-outline mt-0.5">
+                      Fee: 🧢 {formatCaps(order.fee, 2)} • {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                 </div>

@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useMarket } from '../context/MarketContext';
-import { formatCaps, formatPrice, formatPercent } from '../lib/utils';
+import { formatPrice, formatPercent } from '../lib/utils';
 import { JerseyAvatar } from '../components/ui/JerseyAvatar';
 import { PricePill } from '../components/ui/PricePill';
 import { TactileButton } from '../components/ui/TactileButton';
 import { TradeBottomSheet } from '../components/ui/TradeBottomSheet';
 import { Player } from '../lib/types';
+
+interface PlayerDetailedStats {
+  minutes: number;
+  expected_goals_per_90: number | null;
+  expected_assists_per_90: number | null;
+  form: string;
+  recent_match_ratings: number[];
+}
 
 export const PlayerComparePage: React.FC = () => {
   const navigate = useNavigate();
@@ -20,8 +29,74 @@ export const PlayerComparePage: React.FC = () => {
   const [playerBId, setPlayerBId] = useState<string>(initialB);
   const [tradePlayer, setTradePlayer] = useState<Player | null>(null);
 
+  const [statsA, setStatsA] = useState<PlayerDetailedStats | null>(null);
+  const [statsB, setStatsB] = useState<PlayerDetailedStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+
   const playerA = players.find((p) => p.id === playerAId) || players[0];
   const playerB = players.find((p) => p.id === playerBId) || players[1] || players[0];
+
+  useEffect(() => {
+    async function loadRealPlayerStats(p: Player, setStats: (s: PlayerDetailedStats) => void) {
+      if (!p?.fpl_id) {
+        setStats({
+          minutes: 0,
+          expected_goals_per_90: null,
+          expected_assists_per_90: null,
+          form: 'n/a',
+          recent_match_ratings: [],
+        });
+        return;
+      }
+
+      try {
+        const res = await fetch(`https://fantasy.premierleague.com/api/element-summary/${p.fpl_id}/`);
+        if (!res.ok) throw new Error('Failed to fetch element summary');
+        const json = await res.json();
+        const history: any[] = json?.history || [];
+
+        const totalMins = history.reduce((acc, h) => acc + (h.minutes || 0), 0);
+        const totalXg = history.reduce((acc, h) => acc + parseFloat(h.expected_goals || '0'), 0);
+        const totalXa = history.reduce((acc, h) => acc + parseFloat(h.expected_assists || '0'), 0);
+
+        const xG90 = totalMins > 0 ? (totalXg * 90) / totalMins : null;
+        const xA90 = totalMins > 0 ? (totalXa * 90) / totalMins : null;
+
+        // Recent match ratings computed from actual recent match history
+        const recentRatings = history.slice(-5).map((h) => {
+          const bps = h.bps || 0;
+          const mins = h.minutes || 0;
+          if (mins <= 0) return 6.0;
+          return Math.max(3.0, Math.min(10.0, 6.0 + (bps - 15) * 0.12));
+        });
+
+        setStats({
+          minutes: totalMins,
+          expected_goals_per_90: xG90 !== null ? Math.round(xG90 * 100) / 100 : null,
+          expected_assists_per_90: xA90 !== null ? Math.round(xA90 * 100) / 100 : null,
+          form: history.length > 0 ? (history.slice(-3).reduce((a, b) => a + b.total_points, 0) / 3).toFixed(1) : 'n/a',
+          recent_match_ratings: recentRatings,
+        });
+      } catch (_e) {
+        // Fallback: Honest empty/null representation (never fabricate)
+        setStats({
+          minutes: 0,
+          expected_goals_per_90: null,
+          expected_assists_per_90: null,
+          form: 'n/a',
+          recent_match_ratings: [],
+        });
+      }
+    }
+
+    if (playerA && playerB) {
+      setLoadingStats(true);
+      Promise.all([
+        loadRealPlayerStats(playerA, setStatsA),
+        loadRealPlayerStats(playerB, setStatsB),
+      ]).finally(() => setLoadingStats(false));
+    }
+  }, [playerA?.id, playerB?.id]);
 
   if (!playerA || !playerB) return null;
 
@@ -46,7 +121,6 @@ export const PlayerComparePage: React.FC = () => {
       <main className="max-w-md mx-auto px-4 pt-4 flex flex-col gap-4">
         {/* Selector Header Bar */}
         <div className="grid grid-cols-2 gap-3">
-          {/* Player A Select */}
           <div className="flex flex-col gap-1.5 bg-surface-container-lowest p-3 rounded-2xl shadow-[0_2px_0_0_#E9E8E4]">
             <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">
               Asset A
@@ -64,7 +138,6 @@ export const PlayerComparePage: React.FC = () => {
             </select>
           </div>
 
-          {/* Player B Select */}
           <div className="flex flex-col gap-1.5 bg-surface-container-lowest p-3 rounded-2xl shadow-[0_2px_0_0_#E9E8E4]">
             <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">
               Asset B
@@ -128,11 +201,14 @@ export const PlayerComparePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Comparison Metrics Table */}
+        {/* Real Per-90 & Scouting Metrics Table */}
         <section className="w-full bg-surface-container-lowest rounded-3xl p-4 shadow-[0_2px_0_0_#E9E8E4] flex flex-col gap-2.5 text-xs">
-          <h4 className="font-headline-sm text-xs text-on-surface font-bold uppercase tracking-wider mb-1">
-            Scouting Metrics
-          </h4>
+          <div className="flex items-center justify-between">
+            <h4 className="font-headline-sm text-xs text-on-surface font-bold uppercase tracking-wider">
+              Real Performance Metrics
+            </h4>
+            <span className="text-[10px] text-primary font-bold">FPL Season Data</span>
+          </div>
 
           {/* Metric Rows */}
           <div className="flex items-center justify-between py-2 border-b border-surface-container">
@@ -168,6 +244,42 @@ export const PlayerComparePage: React.FC = () => {
             </span>
             <span className="font-bold text-tertiary-container w-24 text-right">
               {formatPercent(playerB.change_24h_pct)}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between py-2 border-b border-surface-container">
+            <span className="font-mono text-on-surface w-24 text-left">
+              {statsA ? (statsA.expected_goals_per_90 !== null ? statsA.expected_goals_per_90.toFixed(2) : 'n/a') : '...'}
+            </span>
+            <span className="text-on-surface-variant text-[11px] font-medium text-center flex-1">
+              xG / 90 min
+            </span>
+            <span className="font-mono text-on-surface w-24 text-right">
+              {statsB ? (statsB.expected_goals_per_90 !== null ? statsB.expected_goals_per_90.toFixed(2) : 'n/a') : '...'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between py-2 border-b border-surface-container">
+            <span className="font-mono text-on-surface w-24 text-left">
+              {statsA ? (statsA.expected_assists_per_90 !== null ? statsA.expected_assists_per_90.toFixed(2) : 'n/a') : '...'}
+            </span>
+            <span className="text-on-surface-variant text-[11px] font-medium text-center flex-1">
+              xA / 90 min
+            </span>
+            <span className="font-mono text-on-surface w-24 text-right">
+              {statsB ? (statsB.expected_assists_per_90 !== null ? statsB.expected_assists_per_90.toFixed(2) : 'n/a') : '...'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between py-2 border-b border-surface-container">
+            <span className="font-bold text-on-surface w-24 text-left">
+              {statsA?.minutes ? `${statsA.minutes}m` : 'n/a'}
+            </span>
+            <span className="text-on-surface-variant text-[11px] font-medium text-center flex-1">
+              Actual Minutes Played
+            </span>
+            <span className="font-bold text-on-surface w-24 text-right">
+              {statsB?.minutes ? `${statsB.minutes}m` : 'n/a'}
             </span>
           </div>
 
