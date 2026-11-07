@@ -1,15 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Match, Player } from '../lib/types';
 import { useMarket } from '../context/MarketContext';
 import { JerseyAvatar } from '../components/ui/JerseyAvatar';
 import { PricePill } from '../components/ui/PricePill';
-import { formatPrice } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
 
-interface FixtureLinkItem {
+interface FixtureItem {
   id: string;
-  worldcup26_event_id: string;
   home_club: string;
   away_club: string;
   kickoff_time: string;
@@ -24,42 +21,75 @@ interface FixtureLinkItem {
 export const LiveTickerPage: React.FC = () => {
   const navigate = useNavigate();
   const { players } = useMarket();
-  const [fixtures, setFixtures] = useState<FixtureLinkItem[]>([]);
+  const [fixtures, setFixtures] = useState<FixtureItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchFixtures = async () => {
-    // Read directly from real fixture_link / matches table populated by worldcup26 provider
-    const { data: linkData } = await supabase
-      .from('fixture_link')
-      .select('*')
-      .order('kickoff_time', { ascending: true });
+    // 1. Fetch real-time live scoreboard directly from worldcup26 (primary provider)
+    try {
+      const res = await fetch('https://worldcup26.ir/get/soccer/eng.1/scoreboard');
+      if (res.ok) {
+        const json = await res.json();
+        const events = json?.events || [];
+        if (events.length > 0) {
+          const directFixtures: FixtureItem[] = events.map((ev: any) => {
+            const comp = ev.competitions?.[0];
+            const homeComp = comp?.competitors?.find((c: any) => c.homeAway === 'home');
+            const awayComp = comp?.competitors?.find((c: any) => c.homeAway === 'away');
+            const homeName = homeComp?.team?.name || homeComp?.team?.displayName || 'Home';
+            const awayName = awayComp?.team?.name || awayComp?.team?.displayName || 'Away';
+            const state: 'pre' | 'in' | 'post' = comp?.status?.type?.state || 'pre';
+            const status = state === 'in' ? 'live' : state === 'post' ? 'finished' : 'scheduled';
+            const displayClock = comp?.status?.displayClock || "0'";
+            const homeScore = parseInt(homeComp?.score || '0', 10);
+            const awayScore = parseInt(awayComp?.score || '0', 10);
 
-    if (linkData && linkData.length > 0) {
-      setFixtures(linkData as FixtureLinkItem[]);
-    } else {
-      // Fallback to matches table
-      const { data: matchData } = await supabase
-        .from('matches')
-        .select('*')
-        .order('match_date', { ascending: true });
+            return {
+              id: String(ev.id),
+              home_club: homeName,
+              away_club: awayName,
+              kickoff_time: ev.date || comp?.date || new Date().toISOString(),
+              status,
+              state,
+              display_clock: displayClock,
+              home_score: homeScore,
+              away_score: awayScore,
+              last_synced_at: json?.leagues?.[0]?.lastSyncedAt || new Date().toISOString(),
+            };
+          });
 
-      if (matchData) {
-        setFixtures(
-          matchData.map((m: any) => ({
-            id: m.id,
-            worldcup26_event_id: m.worldcup26_event_id || m.id,
-            home_club: m.home_club,
-            away_club: m.away_club,
-            kickoff_time: m.match_date,
-            status: m.status,
-            state: m.status === 'live' ? 'in' : m.status === 'finished' ? 'post' : 'pre',
-            display_clock: m.display_clock || (m.current_minute ? `${m.current_minute}'` : "0'"),
-            home_score: m.home_score || 0,
-            away_score: m.away_score || 0,
-            last_synced_at: m.last_synced_at || new Date().toISOString(),
-          }))
-        );
+          setFixtures(directFixtures);
+          setLoading(false);
+          return;
+        }
       }
+    } catch (_e) {
+      // Fallback to Supabase matches table
+    }
+
+    // 2. Fallback to Supabase matches table (filter out matches older than 24h that were never updated)
+    const nowIso = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
+    const { data: matchData } = await supabase
+      .from('matches')
+      .select('*')
+      .gte('match_date', nowIso)
+      .order('match_date', { ascending: true });
+
+    if (matchData) {
+      setFixtures(
+        matchData.map((m: any) => ({
+          id: m.id,
+          home_club: m.home_club,
+          away_club: m.away_club,
+          kickoff_time: m.match_date,
+          status: m.status,
+          state: m.status === 'live' ? 'in' : m.status === 'finished' ? 'post' : 'pre',
+          display_clock: m.display_clock || (m.current_minute ? `${m.current_minute}'` : "0'"),
+          home_score: m.home_score || 0,
+          away_score: m.away_score || 0,
+          last_synced_at: m.last_synced_at || new Date().toISOString(),
+        }))
+      );
     }
     setLoading(false);
   };
@@ -70,7 +100,7 @@ export const LiveTickerPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Strict order: Live matches first, then upcoming scheduled today/next, then finished results
+  // Strict order: Live matches first, then upcoming scheduled, then finished results
   const liveMatches = fixtures.filter((f) => f.state === 'in' || f.status === 'live');
   const upcomingMatches = fixtures.filter((f) => f.state === 'pre' && f.status === 'scheduled');
   const finishedMatches = fixtures.filter((f) => f.state === 'post' || f.status === 'finished');
@@ -233,7 +263,7 @@ export const LiveTickerPage: React.FC = () => {
             {upcomingMatches.length === 0 ? (
               <span className="text-xs text-on-surface-variant italic">No upcoming matches scheduled this week.</span>
             ) : (
-              upcomingMatches.slice(0, 8).map((m) => (
+              upcomingMatches.map((m) => (
                 <div
                   key={m.id}
                   className="w-full bg-surface-container-lowest rounded-2xl p-3 flex items-center justify-between shadow-[0_2px_0_0_#E9E8E4] text-xs"
@@ -265,14 +295,14 @@ export const LiveTickerPage: React.FC = () => {
             </h3>
 
             <div className="flex flex-col gap-2">
-              {finishedMatches.slice(0, 6).map((m) => (
+              {finishedMatches.map((m) => (
                 <div
                   key={m.id}
                   className="w-full bg-surface-container-lowest rounded-2xl p-3 flex items-center justify-between shadow-[0_2px_0_0_#E9E8E4] text-xs"
                 >
                   <div className="flex items-center gap-2 font-medium">
                     <span className="font-bold text-on-surface">{m.home_club}</span>
-                    <span className="font-bold text-on-surface px-1 bg-surface-container rounded">{m.home_score} - {m.away_score}</span>
+                    <span className="font-bold text-on-surface px-1.5 py-0.5 bg-surface-container rounded-lg">{m.home_score} - {m.away_score}</span>
                     <span className="font-bold text-on-surface">{m.away_club}</span>
                   </div>
                   <span className="text-[10px] font-bold text-tertiary-container bg-tertiary-container/10 px-2 py-0.5 rounded-full">
